@@ -423,3 +423,27 @@ headset routing, or every media format.
 Keep the working runtime and installed-ROM module requests unchanged while
 recording this baseline. The tested log-14 build's image SHA-256 is
 `3639637f4715d15c44159ff29c6d7e1bf08b0ab69dc05147f4accaecf4778f13`.
+
+## Catalog downloader and haptics packaging
+
+The diagnostic reports successful WPA2 association and DHCP, but the tested
+image contains no BusyBox. Plugin Manager invokes `busybox wget` directly.
+Enable `AERA_USE_BUSYBOX_BINARY=1` in a device-guarded vendorsetup hook, as
+in the other AERA device trees. Recovery startup already restores `/sbin/*`
+executable permissions; no extra product copy or init chmod is needed.
+
+The stock RichTap node `/dev/aw86927_haptic` is correct for this RT6010
+driver. The original vibrator HAL cannot start while its `/vendor` path
+is covered by the mounted ROM. Package the matching executable, its two
+private libraries and configuration under ramdisk `/system` paths and point
+the existing vibrator service at them. Keep the original kernel-module
+trigger, haptic permissions and direct HAL startup unchanged; no new
+bootstrap service or delay is necessary. No global library is replaced.
+
+The following failed-UI log confirms AAC initialization and registration of
+`android.hardware.vibrator.IVibrator/default`. It also records an earlier
+first-stage display failure: SDE CESTA cannot acquire its interconnect path
+(-517), DRM never registers, and recovery later crashes without a display.
+The known-working and failed images contain identical recovery and graphics
+binaries. Keep this display failure separate from claims of confirmed haptic
+output; the new minimal packaging still requires testing on the device.

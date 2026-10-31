@@ -30,7 +30,7 @@ touch = (root / "system/bin/runatboot.sh").read_text()
 assert "focaltech_fts" in touch and '"$TOUCH_READY" = 1' in touch
 
 search = [root / directory for directory in (
-    "vendor/lib64", "vendor/lib64/egl", "system/lib64", "system/lib64/bootstrap", "system_ext/lib64",
+    "system/lib64/aera-haptics", "vendor/lib64", "vendor/lib64/egl", "system/lib64", "system/lib64/bootstrap", "system_ext/lib64",
 )]
 queue = [root / "vendor/lib64" / name for name in (
     "egl/libEGL_adreno.so", "egl/libGLESv2_adreno.so",
@@ -43,6 +43,14 @@ queue = [root / "vendor/lib64" / name for name in (
     "vendor.qti.hardware.display.snapalloc-impl.so",
 )]
 queue.append(root / "vendor/bin/hw/vendor.qti.hardware.display.allocator-service")
+queue.extend(root / name for name in (
+    "system/bin/aera-vibrator-service",
+    "system/lib64/aera-haptics/libics_haptic.so", "system/lib64/aera-haptics/libaacvibrator.so",
+))
+vibrator_rc = (root / "vendor/etc/init/android.hardware.vibrator.service.nothing-rt_ics.rc").read_text()
+assert "service vendor.qti.vibrator /system/bin/aera-vibrator-service" in vibrator_rc
+assert "LD_LIBRARY_PATH /system/lib64/aera-haptics:/system/lib64" in vibrator_rc
+assert (root / "system/etc/aera-haptics/aac_richtap.config").is_file()
 # These components are loaded with dlopen, not DT_NEEDED, so an ELF dependency
 # walk alone cannot prove that the buffer allocator is packaged or declared.
 manifests = [ET.parse(p).getroot() for p in (root / "vendor/etc/vintf/manifest").glob("*.xml")]
@@ -97,4 +105,4 @@ for path in visited | {root / "system/bin/linker64"}:
 unresolved = {name: sorted(symbols - provided) for name, symbols in required.items()
               if symbols - provided}
 assert not unresolved, f"Unresolved GPU strong symbols: {unresolved}"
-print(f"PASS: UI reference height, init cleanup, touch guard and {len(visited)} GPU dependency ELFs")
+print(f"PASS: UI reference height, init cleanup, touch guard and {len(visited)} GPU/haptic dependency ELFs")

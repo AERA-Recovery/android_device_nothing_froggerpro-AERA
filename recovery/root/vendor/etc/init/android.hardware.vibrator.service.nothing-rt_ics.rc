@@ -1,10 +1,10 @@
-service vendor.qti.vibrator /vendor/bin/hw/android.hardware.vibrator.service.nothing-rt_ics
+service vendor.qti.vibrator /system/bin/aera-vibrator-service
     class hal
     user root
     group root input
     setenv RICHTAP_DEVICE_PATH  /dev/aw86927_haptic
-    setenv ENV_RICHTAP_CONFIG_PATH /vendor/odm/etc/aac_richtap.config
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
+    setenv ENV_RICHTAP_CONFIG_PATH /system/etc/aera-haptics/aac_richtap.config
+    setenv LD_LIBRARY_PATH /system/lib64/aera-haptics:/system/lib64:/system/lib64/bootstrap
     disabled
     seclabel u:r:recovery:s0
 
