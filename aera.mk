@@ -3,7 +3,7 @@ AERA_MAINTAINER := imqiyton
 AERA_BUILD_STATUS := Official
 # Stable implicitly enables the legacy ADB/MTP shutdown.
 # Beta retains init-managed debug ADB, including at the decryption screen.
-AERA_BUILD_TYPE := Beta
+AERA_BUILD_TYPE ?= Beta
 AERA_ADVANCED_SECURITY := 0
 # 1260x2800 panel expressed in the UI's 1080-wide reference units.
 AERA_SCREEN_H := 2400
