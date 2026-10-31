@@ -17,9 +17,7 @@ DEVICE_PATH := device/nothing/froggerpro
 # Inherit from Asteroids device
 $(call inherit-product, $(DEVICE_PATH)/device.mk)
 
-# Include TWRP configurations
-$(call inherit-product, $(DEVICE_PATH)/twrp_config.mk)
-$(call inherit-product, $(DEVICE_PATH)/aera.mk)
+# AERA recovery flags are included from BoardConfig.mk.
 PRODUCT_DEVICE := froggerpro
 PRODUCT_NAME := twrp_froggerpro
 PRODUCT_BRAND := Nothing

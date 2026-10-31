@@ -3,23 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Small recovery-side host for Qualcomm's device-matched AGM implementation.
- * The proprietary implementation remains on the installed stock /vendor and
- * is loaded only on Dodge. Plugins never receive /dev/snd or partition access.
+ * The device-matched implementation ships in the recovery audio namespace.
+ * Plugins never receive /dev/snd or partition access.
  */
 #include <android/binder_ibinder.h>
 #include <android/binder_process.h>
 #include <android/log.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <sys/system_properties.h>
 
 #include <stdio.h>
 #include <string.h>
 
 static const char kTag[] = "AERAAudio";
 static const char kAgmService[] =
-    "/mnt/aera-stock/vendor/lib64/libagmipcservice.so";
+    "/vendor/aera-audio-lib64/libagmipcservice.so";
 static const char kPalService[] =
-    "/mnt/aera-stock/vendor/lib64/libpalipcservice.so";
+    "/vendor/aera-audio-lib64/libpalipcservice.so";
 
 // binder_manager.h currently exposes C++-only typedef spellings in this
 // branch's platform header. The exported NDK function itself has a C ABI.
@@ -46,7 +47,8 @@ static void* RegisterServiceLibrary(const char* path, const char* descriptor,
   if (!register_service || symbol_error) {
     __android_log_print(ANDROID_LOG_ERROR, kTag, "%s symbol failed: %s", label,
                         symbol_error ? symbol_error : "registerService missing");
-    dlclose(library);
+    // Vendor constructors may already have started worker threads. Keep the
+    // library mapped until this disposable service process exits.
     return NULL;
   }
 
@@ -56,7 +58,8 @@ static void* RegisterServiceLibrary(const char* path, const char* descriptor,
     __android_log_print(ANDROID_LOG_ERROR, kTag,
                         "%s registration was rejected for %s", label,
                         descriptor);
-    dlclose(library);
+    // registerService can leave Binder/GPR workers running even on failure.
+    // Unloading their code here races those threads and can cause SIGSEGV.
     return NULL;
   }
   AIBinder_decStrong(service);
@@ -65,8 +68,9 @@ static void* RegisterServiceLibrary(const char* path, const char* descriptor,
 }
 
 int main(int argc, char** argv) {
-  if (argc != 2 || strcmp(argv[1], "--dodge-stock-agm") != 0) {
-    Log(ANDROID_LOG_ERROR, "Refusing to start without the Dodge stock AGM mode.");
+  __system_property_set("sys.aera.audio.ready", "0");
+  if (argc != 2 || strcmp(argv[1], "--froggerpro-agm") != 0) {
+    Log(ANDROID_LOG_ERROR, "Refusing to start without FroggerPro AGM mode.");
     return 64;
   }
   if (getuid() != 0 || access(kAgmService, R_OK) != 0 ||
@@ -79,21 +83,25 @@ int main(int argc, char** argv) {
   ABinderProcess_startThreadPool();
 
   void* agm_library = RegisterServiceLibrary(
-      kAgmService, "vendor.qti.hardware.agm.IAGM/default", "Dodge stock AGM");
+      kAgmService, "vendor.qti.hardware.agm.IAGM/default", "FroggerPro AGM");
   if (!agm_library) {
-    return 70;
+    _exit(70);
   }
   void* pal_library = RegisterServiceLibrary(
-      kPalService, "vendor.qti.hardware.pal.IPAL/default", "Dodge stock PAL");
+      kPalService, "vendor.qti.hardware.pal.IPAL/default", "FroggerPro PAL");
   if (!pal_library) {
-    dlclose(agm_library);
-    return 70;
+    _exit(70);
   }
 
-  Log(ANDROID_LOG_INFO, "Dodge stock AGM/PAL audio services are ready.");
+  if (__system_property_set("sys.aera.audio.ready", "1") != 0) {
+    Log(ANDROID_LOG_ERROR, "Could not publish audio readiness.");
+    _exit(70);
+  }
+  Log(ANDROID_LOG_INFO, "FroggerPro AGM/PAL audio services are ready.");
   ABinderProcess_joinThreadPool();
+  __system_property_set("sys.aera.audio.ready", "0");
   Log(ANDROID_LOG_ERROR, "Audio Binder thread pool exited unexpectedly.");
-  dlclose(pal_library);
-  dlclose(agm_library);
-  return 70;
+  // Let the kernel reclaim the vendor libraries and all their threads
+  // together; exit-time cleanup must not run below live Binder workers.
+  _exit(70);
 }

@@ -59,6 +59,6 @@ Manifest        | https://github.com/AERA-Recovery/android_manifest.git
 ## Aera-specific features
 - [x] Graphics
 - [ ] Network
-- [ ] Audio
+- [x] Audio (speaker playback confirmed in logcat (15))
 
 Thanks to dx4m for providing battery and otg support

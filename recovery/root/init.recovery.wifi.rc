@@ -1,27 +1,68 @@
-on property:post.decrypt.modules=true
+on init
+    setprop wifi.driver.ready false
+
+# Wi-Fi must also be available when the user skips credential decryption.
+# The common loader stages these installed-ROM modules before unmounting
+# system_dlkm/vendor_dlkm. Load rfkill first from that staging area as well;
+# the vendor modprobe dependency path cannot see versioned system_dlkm trees.
+on property:twrp.modules.loaded=true
     setprop sys.aera.wlan.up 0
-    chmod 222 /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready
-    write /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready 1
+    setprop wifi.driver.ready false
+
+    # qcom init owns the physical modem/persist mounts from fs onward.
+    # Use this phone's active firmware and calibration without stacking mounts.
+    write /sys/module/firmware_class/parameters/path /vendor/firmware_mnt/image
+
+    insmod /tmp/post_decrypt_modules/qcom_ramdump.ko
+    insmod /tmp/post_decrypt_modules/qmi_helpers.ko
+    insmod /tmp/post_decrypt_modules/pdr_interface.ko
+    insmod /tmp/post_decrypt_modules/qcom_va_minidump.ko
+    insmod /tmp/post_decrypt_modules/smem-mailbox.ko
+    insmod /tmp/post_decrypt_modules/cnss_prealloc.ko
+    insmod /tmp/post_decrypt_modules/cnss_utils.ko
+    insmod /tmp/post_decrypt_modules/cnss_nl.ko
+    insmod /tmp/post_decrypt_modules/wlan_firmware_service.ko
+    insmod /tmp/post_decrypt_modules/rfkill.ko
+    # The machine audio card also needs the WCN6750 Slimbus endpoint.
+    insmod /tmp/post_decrypt_modules/btpower.ko
+    insmod /tmp/post_decrypt_modules/btfmcodec.ko
+    insmod /tmp/post_decrypt_modules/btfm_slim_codec.ko
+    insmod /tmp/post_decrypt_modules/cfg80211.ko
+    insmod /tmp/post_decrypt_modules/icnss2.ko
+    insmod /tmp/post_decrypt_modules/qca_cld3_qca6750.ko
+
+    # Match stock init.vendor.wlan.rc: FroggerPro boots integrated WPSS through
+    # ICNSS, rather than an external CNSS/Peach PCIe controller.
+    write /sys/kernel/icnss/wlan_en_delay 1000
+    write /sys/kernel/icnss/wpss_boot 1
+    start aera-wlan-ready
+
+# Retry discovery without resetting an already running WPSS or supplicant.
+on property:post.decrypt.modules=true
     start aera-wlan-ready
 
 on property:wifi.driver.ready=true
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
+    # Android wpa_supplicant drops to AID_WIFI before opening this directory.
+    mkdir /tmp/recovery 0770 root wifi
+    mkdir /tmp/recovery/sockets 0770 wifi wifi
     start wpa_supplicant
 
 on property:sys.aera.wlan.up=1 && property:wifi.driver.ready=true
     setprop sys.aera.wlan.up 0
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
+    mkdir /tmp/recovery 0770 root wifi
+    mkdir /tmp/recovery/sockets 0770 wifi wifi
     start wpa_supplicant
 
-service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
     disabled
+    user root
+    group root inet net_admin net_raw
     seclabel u:r:recovery:s0
 
 service aera-wlan-ready /system/bin/sh -c "until test -e /sys/class/net/wlan0; do sleep 1; done; setprop wifi.driver.ready true"
     disabled
     oneshot
+    timeout_period 60
     user root
     group root
     seclabel u:r:recovery:s0

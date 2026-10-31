@@ -130,7 +130,6 @@ BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS += --flags 3 # disable hashtree/verification
 
 # Encryption
 BOARD_USES_METADATA_PARTITION := true
-BOARD_USES_QCOM_FBE_DECRYPTION := true
 PLATFORM_VERSION := 99.87.36
 PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 PLATFORM_SECURITY_PATCH := 2099-12-31
@@ -138,11 +137,11 @@ VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
 
 DEVICE_MANIFEST_FILE := $(DEVICE_PATH)/recovery/root/vendor/etc/vintf/manifest.xml
 
-# Hack: prevent anti rollback
-PLATFORM_SECURITY_PATCH := 2099-12-31
-VENDOR_SECURITY_PATCH := 2099-12-31
-PLATFORM_VERSION := 16.1.0
-
 # Sepolicy
 BOARD_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy
+
+# Device/recovery options belong in BoardConfig so AERA's Make/Soong bridge
+# sees the same values. Do not inherit them as PRODUCT_* configuration.
+include $(DEVICE_PATH)/aera.mk
+include $(DEVICE_PATH)/aera_config.mk
 

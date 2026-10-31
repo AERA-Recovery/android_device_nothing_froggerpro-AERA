@@ -6,5 +6,8 @@
 #
 
 PRODUCT_MAKEFILES := \
-    $(LOCAL_DIR)/aera_froggerpro.mk
+    twrp_froggerpro:$(LOCAL_DIR)/aera_froggerpro.mk
+
+COMMON_LUNCH_CHOICES := \
+    twrp_froggerpro-eng
 

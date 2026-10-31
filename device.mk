@@ -12,11 +12,6 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/developer_gsi_keys.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/emulated_storage.mk)
 
 PRODUCT_PACKAGES += \
-    android.hardware.boot@1.2-impl-qti \
-    android.hardware.boot@1.2-impl-qti.recovery \
-    android.hardware.boot@1.2-service
-
-PRODUCT_PACKAGES += \
     update_engine \
     update_engine_sideload \
     update_verifier
@@ -43,20 +38,21 @@ PRODUCT_PACKAGES += \
     f2fs_io \
     check_f2fs
 
+# Protected PCM bridge, built here; no runtime dependency on another tree.
+PRODUCT_PACKAGES += aera-audio-service aera-audio-bridge
+
 # fastbootd
 PRODUCT_PACKAGES += \
     android.hardware.fastboot@1.1-impl-mock \
     fastbootd
 
-# qcom decryption
-PRODUCT_PACKAGES += \
-    qcom_decrypt \
-    qcom_decrypt_fbe
+# Retain the shared property preparation script, but use this device's
+# vendor KeyMint/Gatekeeper services rather than legacy HIDL init templates.
+PRODUCT_COPY_FILES += \
+    device/qcom/twrp-common/crypto/system/bin/prepdecrypt.sh:$(TARGET_COPY_OUT_RECOVERY)/root/system/bin/prepdecrypt.sh
 
 PRODUCT_EXTRA_RECOVERY_KEYS += \
-    $(LOCAL_PATH)/security/otacert
-
-BOARD_USES_QCOM_FBE_DECRYPTION  := true
+    $(DEVICE_PATH)/security/otacert
 
 TARGET_RECOVERY_QCOM_RTC_FIX := true
 
@@ -81,7 +77,7 @@ PRODUCT_COPY_FILES += \
 
 # Soong namespaces
 PRODUCT_SOONG_NAMESPACES += \
-    $(LOCAL_PATH) \
+    $(DEVICE_PATH) \
     vendor/qcom/opensource/commonsys-intf/display
 
 PRODUCT_PROPERTY_OVERRIDES += persist.sys.fuse.passthrough.enable=true

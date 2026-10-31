@@ -7,3 +7,4 @@ service vendor.boot-qti /vendor/bin/hw/android.hardware.boot-service.qti
     group root
     setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64:/bin
     seclabel u:r:recovery:s0
+    interface aidl android.hardware.boot.IBootControl/default

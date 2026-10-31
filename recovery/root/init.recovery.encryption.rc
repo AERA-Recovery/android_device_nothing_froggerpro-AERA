@@ -1,5 +1,6 @@
 
-on init
+# Firmware and persist must be mounted before qseecomd starts.
+on post-fs
     start vendor.qseecomd
 
 # Runs after qseecomd runs
@@ -8,19 +9,14 @@ on property:vendor.sys.listeners.registered=true
     start vendor.keymint-qti
     start vendor.gatekeeper-qti
 
-# Runs post-fs-data
-on property:ro.crypto.state=encrypted && property:twrp.firmware.mounted=true
+# Keep the preparation trigger used by the shared dynamic-partition helper.
+on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
     start prepdecrypt
-
-on property:crypto.ready=1
-    start vendor.secure_element
 
 # Runs after decryption
 on property:twrp.all.users.decrypted=true
     stop keystore2
 
-    stop vendor.secure_element
-    stop se_omapi
     stop vendor.keymint-qti
     stop vendor.qseecomd
     stop vendor.ssgtzd
@@ -34,11 +30,9 @@ on property:twrp.all.users.decrypted=true
 
 
 # HM: Runs during decryption process
-on property:twrp.firmware.mounted=true && property:init.svc.vendor.secure_element=running
-    exec u:r:recovery:s0 -- /system/bin/sh -c "/system/bin/sleep 1"
-
-    umount /vendor/firmware_mnt
-    umount /firmware
-    umount /mnt/vendor/persist
-
-    setprop twrp.firmware.mounted false
+service prepdecrypt /system/bin/prepdecrypt.sh
+    user root
+    group root
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0

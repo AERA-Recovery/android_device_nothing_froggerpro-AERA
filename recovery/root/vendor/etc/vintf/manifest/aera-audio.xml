@@ -1,0 +1,17 @@
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>vendor.qti.hardware.agm</name>
+        <version>1</version>
+        <fqname>IAGM/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>vendor.qti.hardware.pal</name>
+        <version>1</version>
+        <fqname>IPAL/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>vendor.qti.hardware.dsp</name>
+        <version>1</version>
+        <fqname>IDspService/default</fqname>
+    </hal>
+</manifest>

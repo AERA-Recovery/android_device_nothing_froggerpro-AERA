@@ -1,0 +1,184 @@
+#!/system/bin/sh
+# Copyright (C) 2026 AERA Recovery Project contributors
+# SPDX-License-Identifier: Apache-2.0
+# No logical-partition mounts or inherited OnePlus calibration/runtime paths.
+PATH=/system/bin:/sbin
+export PATH
+
+fail() {
+    echo "AERA FroggerPro audio: $*" >&2
+    echo "AERA FroggerPro audio: $*" > /dev/kmsg
+    exit 1
+}
+
+case "$(getprop ro.product.device)" in
+    froggerpro|FroggerPro|A069P) ;;
+    *) fail "device mismatch" ;;
+esac
+
+start_service() {
+    service_name="$1"
+    [ "$(getprop init.svc.${service_name})" = running ] && return 0
+    setprop ctl.start "${service_name}" || return 1
+    count=0
+    while [ "$count" -lt 50 ]; do
+        [ "$(getprop init.svc.${service_name})" = running ] && return 0
+        count=$((count + 1))
+        sleep 0.1
+    done
+    return 1
+}
+
+# Capture the actual missing codec/component once if the card still defers.
+# This is a temporary, read-only diagnostic view, never a partition mount.
+dump_audio_state() {
+    mkdir /tmp/aera-audio-state.lock 2>/dev/null || return
+    debug=/sys/kernel/debug
+    mounted_debug=0
+    if [ ! -r "$debug/asoc/components" ]; then
+        debug=/tmp/aera-audio-debugfs
+        mkdir -p "$debug"
+        if mount -t debugfs -o ro,nosuid,nodev,noexec debugfs "$debug"; then
+            mounted_debug=1
+        fi
+    fi
+    {
+        echo '--- ALSA cards ---'
+        cat /proc/asound/cards
+        echo '--- ADSP userspace packet transport ---'
+        ls -l /dev/aud_pasthru_adsp
+        echo '--- ADSP FastRPC devices ---'
+        ls -l /dev/fastrpc-adsp-secure
+        [ ! -e /dev/fastrpc-adsp ] || ls -l /dev/fastrpc-adsp
+        echo '--- ASoC components ---'
+        cat "$debug/asoc/components"
+        echo '--- ASoC DAIs ---'
+        cat "$debug/asoc/dais"
+        echo '--- Deferred probes ---'
+        cat "$debug/devices_deferred"
+        echo '--- Sound card codec names ---'
+        tr '\000' '\n' < /proc/device-tree/soc/spf_core_platform/sound/asoc-codec-names
+        echo '--- Sound card link settings (device-tree bytes, big-endian) ---'
+        for property in qcom,model qcom,wcn-bt qcom,wcn-bt-ext qcom,wsa-max-devs \
+                        qcom,wcd-disabled qcom,ext-disp-audio-rx qcom,mi2s-audio-intf \
+                        qcom,qmp-mic swr-haptics-unsupported; do
+            value="/proc/device-tree/soc/spf_core_platform/sound/$property"
+            [ -r "$value" ] || continue
+            echo "$property: $(od -An -tx1 "$value")"
+        done
+        echo '--- SoundWire devices and bound drivers ---'
+        for dev in /sys/bus/soundwire/devices/* /sys/bus/swr/devices/*; do
+            [ -d "$dev" ] || continue
+            echo "$dev driver=$(readlink "$dev/driver")"
+            [ ! -r "$dev/modalias" ] || cat "$dev/modalias"
+        done
+        echo '--- Slimbus devices and bound drivers ---'
+        for dev in /sys/bus/slimbus/devices/*; do
+            [ -d "$dev" ] || continue
+            echo "$dev driver=$(readlink "$dev/driver")"
+            [ ! -r "$dev/modalias" ] || cat "$dev/modalias"
+            [ ! -r "$dev/of_node/compatible" ] || tr '\000' '\n' < "$dev/of_node/compatible"
+        done
+        echo '--- Loaded modules ---'
+        cat /proc/modules
+    } > /tmp/aera-audio-state.txt 2>&1
+    [ "$mounted_debug" = 1 ] && umount "$debug"
+    # Keep the complete report on tmpfs and put a bounded copy in logcat's
+    # kernel buffer, so a normal tester log contains the codec state as well.
+    head -n 180 /tmp/aera-audio-state.txt | while IFS= read -r line; do
+        echo "AERA FroggerPro audio state: $line" > /dev/kmsg
+    done
+}
+
+for service_name in aera-pd-mapper aera-dspservice; do
+    start_service "$service_name" || fail "$service_name failed to start"
+done
+
+# Wait for firmware before retrying the failed first-stage automatic boot.
+# Select only ADSP by name: WPSS is remoteproc0 on this device.
+adsp_node=""
+count=0
+while [ "$count" -lt 100 ]; do
+    for node in /sys/class/remoteproc/remoteproc*; do
+        case "$(cat "$node/name" 2>/dev/null)" in
+            *remoteproc-adsp) adsp_node="$node"; break ;;
+        esac
+    done
+    [ -n "$adsp_node" ] && [ -f /vendor/firmware_mnt/image/adsp.mdt ] && break
+    count=$((count + 1))
+    sleep 0.1
+done
+[ -n "$adsp_node" ] || fail "ADSP remoteproc is missing"
+[ -f /vendor/firmware_mnt/image/adsp.mdt ] || fail "ADSP firmware is unavailable"
+if [ "$(cat "$adsp_node/state")" != running ]; then
+    # Make the kernel's direct firmware requests use the same physical mount.
+    echo /vendor/firmware_mnt/image > /sys/module/firmware_class/parameters/path
+    if ! echo start > "$adsp_node/state"; then
+        [ "$(cat "$adsp_node/state")" = running ] || fail "ADSP did not start"
+    fi
+fi
+echo "AERA FroggerPro audio: ADSP $(cat "$adsp_node/state") after firmware mount" > /dev/kmsg
+[ "$(cat "$adsp_node/state")" = running ] || fail "ADSP is not running"
+[ "$1" = --early-adsp ] && exit 0
+
+count=0
+while [ ! -e /dev/snd/controlC0 ] && [ "$count" -lt 100 ]; do
+    count=$((count + 1))
+    sleep 0.1
+done
+if [ ! -e /dev/snd/controlC0 ]; then
+    dump_audio_state
+    fail "machine sound card did not register; state saved to /tmp/aera-audio-state.txt"
+fi
+# ALSA registration alone does not provide the userspace GPR transport.
+# audio_pkt_dlkm creates this node; allow its probe and ueventd to finish
+# before AGM caches an empty IPC table and fails its SPF readiness check.
+count=0
+while [ ! -c /dev/aud_pasthru_adsp ] && [ "$count" -lt 100 ]; do
+    count=$((count + 1))
+    sleep 0.1
+done
+if [ ! -c /dev/aud_pasthru_adsp ]; then
+    dump_audio_state
+    fail "ADSP audio packet transport is missing; state saved to /tmp/aera-audio-state.txt"
+fi
+# ADSP is a secure FastRPC domain. Unlike CDSP/NSP, its driver need not
+# expose a non-secure /dev/fastrpc-adsp node at all.
+for ipc in /dev/fastrpc-adsp-secure; do
+    count=0
+    while [ ! -c "$ipc" ] && [ "$count" -lt 100 ]; do
+        count=$((count + 1))
+        sleep 0.1
+    done
+    if [ ! -c "$ipc" ]; then
+        dump_audio_state
+        fail "ADSP FastRPC device is missing: $ipc; state saved to /tmp/aera-audio-state.txt"
+    fi
+done
+# Crypto/module setup can temporarily cover the ramdisk's vendor directory.
+# Do not start init services until their matched executables and libraries
+# are visible again. Kernel/device readiness does not imply runtime visibility.
+for runtime in /vendor/bin/aera-adsprpcd /vendor/bin/aera-audioadsprpcd \
+               /vendor/aera-audio-lib64/libadsprpc.so; do
+    count=0
+    while [ ! -r "$runtime" ] && [ "$count" -lt 100 ]; do
+        count=$((count + 1))
+        sleep 0.1
+    done
+    [ -r "$runtime" ] || fail "ramdisk audio runtime is unavailable: $runtime"
+done
+mkdir -p /data/vendor/audio/acdbdata/delta /data/vendor/audio_dsp
+start_service aera-adsprpcd || fail "aera-adsprpcd failed to start"
+start_service aera-audioadsprpcd || fail "aera-audioadsprpcd failed to start"
+start_service aera-agm-service || fail "AGM/PAL service did not start"
+count=0
+while [ "$count" -lt 50 ]; do
+    if [ "$(getprop sys.aera.audio.ready)" = 1 ] &&
+       [ "$(getprop init.svc.aera-agm-service)" = running ]; then
+        echo "AERA FroggerPro audio: AGM/PAL runtime ready"
+        exit 0
+    fi
+    count=$((count + 1))
+    sleep 0.1
+done
+fail "AGM/PAL Binder registration did not complete"

@@ -1,5 +1,5 @@
 import /init.recovery.encryption.rc
-import /init.recovery.qcom_decrypt.fbe.rc
+import /init.recovery.wifi.rc
 
 # Set SELinux to Permissive
 on early-init
@@ -13,6 +13,8 @@ on early-init
     write /sys/bus/platform/devices/1d84000.ufshc/enable_wb_buf_flush 0
 
 on init
+    # Match stock's native Mapper5 + AIDL allocator path.
+    setprop vendor.gralloc.enable_snapalloc true
     start vendor.boot-qti
 
 on fs
@@ -25,22 +27,30 @@ on fs
     # Mount firmware - Needed for ADSP firmwares
     mkdir /firmware
     mount vfat /dev/block/by-name/modem${ro.boot.slot_suffix} /firmware ro
+    # One owner for the physical firmware mount, shared by ADSP and WLAN.
+    mkdir /vendor/firmware_mnt 0755 root root
+    mount none /firmware /vendor/firmware_mnt bind
 
     # Mount persist - Needed for haptics
     # We want to load this BEFORE "twrp.modules.loaded=true"
     mkdir /mnt/vendor/persist/
     mount ext4 /dev/block/bootdevice/by-name/persist /mnt/vendor/persist/ ro
 
+    mkdir /vendor/dsp 0755 root root
+    mount ext4 /dev/block/by-name/dsp${ro.boot.slot_suffix} /vendor/dsp ro noload
+    symlink /vendor/dsp /dsp
+
+# AudioPD must exist before the SPF probe window, not after decryption.
+on post-fs
+    start aera-graphics-allocator
+    start aera-pd-mapper
+    start aera-dspservice
+    start aera-adsp-ready
+
 on property:twrp.modules.loaded=true
-    # Load ADSP firmware for PMIC
-    wait /sys/kernel/boot_adsp/boot
-    write /sys/kernel/boot_adsp/boot 1
-
-    # Fixes Battery Percentage and USB-OTG
-    write /sys/class/remoteproc/remoteproc1/state start
-
-    wait /sys/class/power_supply/battery
-    
+    # Retry the initial firmware request only after modem firmware is mounted.
+    # The bootstrap identifies ADSP by name and leaves a running DSP alone.
+    start aera-adsp-ready
     # Load haptic kernel modules (smem should be loaded by TW_LOAD_VENDOR_MODULES)
     insmod /lib/modules/haptic.ko
     insmod /lib/modules/hapticdrv.ko
@@ -51,6 +61,8 @@ on property:twrp.modules.loaded=true
     # Haptic permissions
     chmod 0666 /dev/aw86927_haptic
     chown system system /dev/aw86927_haptic
+    chmod 0660 /dev/ics_sfdc
+    chown system system /dev/ics_sfdc
     chmod 0666 /proc/haptic/f0
     chown system system /proc/haptic/f0
     chmod 0666 /proc/haptic/lra_resistance
@@ -82,15 +94,16 @@ on property:twrp.modules.loaded=true
     start health-hal-2-1
     start vendor.qti.vibrator
 
-    # Unmount /firmware
-
-on boot
-    setprop sys.usb.config adb
-
-import /init.recovery.qcom_decrypt.rc
-
-
 # AERA configurations
+
+service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
+    class hal
+    disabled
+    seclabel u:r:recovery:s0
+    user root
+    group root system graphics drmrpc
+    capabilities SYS_NICE
+    interface aidl android.hardware.graphics.allocator.IAllocator/default
 
 service aera-pd-mapper /vendor/bin/aera-pd-mapper
     class core
@@ -98,7 +111,7 @@ service aera-pd-mapper /vendor/bin/aera-pd-mapper
     seclabel u:r:recovery:s0
     user system
     group system
-    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/aera-stock-lib64:/vendor/lib64:/system/lib64
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-lib64:/vendor/lib64:/system/lib64
 
 service aera-dspservice /vendor/bin/aera-dspservice
     class hal
@@ -107,8 +120,16 @@ service aera-dspservice /vendor/bin/aera-dspservice
     user system
     group system wakelock oem_2908
     capabilities BLOCK_SUSPEND
-    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/aera-stock-lib64:/vendor/lib64:/system/lib64
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-lib64:/vendor/lib64:/system/lib64
     interface aidl vendor.qti.hardware.dsp.IDspService/default
+
+service aera-adsprpcd /vendor/bin/aera-adsprpcd rootpd adsp
+    class main
+    disabled
+    seclabel u:r:recovery:s0
+    user system
+    group media
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-lib64:/vendor/lib64:/system/lib64
 
 service aera-audioadsprpcd /vendor/bin/aera-audioadsprpcd audiopd adsp
     class main
@@ -116,29 +137,47 @@ service aera-audioadsprpcd /vendor/bin/aera-audioadsprpcd audiopd adsp
     seclabel u:r:recovery:s0
     user media
     group media
-    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/aera-stock-lib64:/vendor/lib64:/system/lib64
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-lib64:/vendor/lib64:/system/lib64
 
 # Keep AGM in its own init process group. A child forked by the one-shot
 # bootstrap would be killed automatically as soon as that bootstrap exits.
-service aera-agm-service /system/bin/aera-audio-service --dodge-stock-agm
+service aera-agm-service /system/bin/aera-audio-service --froggerpro-agm
     class main
     disabled
     seclabel u:r:recovery:s0
     user root
     group root system audio media wakelock
-    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/aera-stock-lib64:/vendor/lib64:/system/lib64
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-lib64:/vendor/lib64:/system/lib64
     setenv ANDROID_ROOT /system
     setenv ANDROID_DATA /data
     interface aidl vendor.qti.hardware.agm.IAGM/default
     interface aidl vendor.qti.hardware.pal.IPAL/default
 
-# Start the audio DSP while SPF's deferred-probe window is still open. The
-# browser bridge may invoke the same idempotent bootstrap later; it will wait
-# for this instance or reuse the running AGM service.
+on property:init.svc.aera-agm-service=stopped
+    setprop sys.aera.audio.ready 0
+
+on property:init.svc.aera-agm-service=restarting
+    setprop sys.aera.audio.ready 0
+
+# On-demand setup for the protected browser/media bridge. The transport
+# transport services start before the SPF probe window. Start both listeners
+# from the playback bootstrap after the ramdisk vendor runtime is visible;
+# the crypto/module phase can temporarily mount the ROM over /vendor.
 service aera-audio-bootstrap /system/bin/aera-audio-bootstrap
     class core
     disabled
     oneshot
+    seclabel u:r:recovery:s0
+    user root
+    group root system audio media wakelock
+
+# Initial kernel auto-boot can run before /vendor/firmware_mnt exists.
+# ADSP also hosts charger_pd, so it cannot wait for an audio playback request.
+service aera-adsp-ready /system/bin/aera-audio-bootstrap --early-adsp
+    class core
+    disabled
+    oneshot
+    timeout_period 30
     seclabel u:r:recovery:s0
     user root
     group root system audio media wakelock
