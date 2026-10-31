@@ -4,6 +4,9 @@
 # Do not enable packaging options when another device is selected.
 case "${AERA_BUILD_DEVICE:-${TARGET_PRODUCT:-${1:-}}}" in
     froggerpro|twrp_froggerpro|twrp_froggerpro-*)
+        # Keep packaging labels consistent with the compiled recovery flags.
+        export AERA_BUILD_STATUS=Official
+        export AERA_BUILD_TYPE=Beta
         # Plugin Manager uses this static binary's wget HTTPS downloader.
         export AERA_USE_BUSYBOX_BINARY=1
         ;;

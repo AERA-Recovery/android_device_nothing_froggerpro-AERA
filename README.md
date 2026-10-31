@@ -21,7 +21,7 @@ Dimensions              | 163.7 x 76.6 x 8 mm
 Display                 | 6.83 inches, Amoled, 144Hz
 Resolution              | 1260 x 2800
 
-Recovery        | Aera R1.0 beta
+Recovery        | AERA R1.0 Official Beta
 :---------------|:---------------------------
 Variant         | 6.6
 Manifest        | https://github.com/AERA-Recovery/android_manifest.git 

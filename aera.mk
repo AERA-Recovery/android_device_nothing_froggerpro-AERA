@@ -1,5 +1,7 @@
 AERA_MAINTAINER := imqiyton
-# Development image: Stable implicitly enables the legacy ADB/MTP shutdown.
+# Official device support, retaining the Beta release channel.
+AERA_BUILD_STATUS := Official
+# Stable implicitly enables the legacy ADB/MTP shutdown.
 # Beta retains init-managed debug ADB, including at the decryption screen.
 AERA_BUILD_TYPE := Beta
 AERA_ADVANCED_SECURITY := 0
