@@ -96,6 +96,9 @@ TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
 
+# Limit bundled root-provider modules when Root Manager is enabled.
+AERA_ROOT_MODULE_KERNELS := 6.6
+
 # Despite being VA/B device, there is a dedicated recovery partition
 BOARD_USES_RECOVERY_AS_BOOT := 
 BOARD_MOVE_RECOVERY_RESOURCES_TO_VENDOR_BOOT :=
